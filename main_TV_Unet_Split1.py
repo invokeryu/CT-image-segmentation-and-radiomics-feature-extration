@@ -189,6 +189,12 @@ model.compile(optimizer = adam_v2.Adam(), loss = [my_loss], metrics = ['accuracy
                                                                        Precision(name = 'pre_1')])
 model.summary()
 
+parser = argparse.ArgumentParser()
+
+parser.add_argument("--infer", action = "store_true")
+
+args = parser.parse_args()
+
 '''#########################################################################'''
 # Split train and validation
 X_train, X_valid, y_train, y_valid = train_test_split(X, labels, test_size = 0.1, random_state = 42)
@@ -199,8 +205,9 @@ callbacks = [
     ModelCheckpoint('model-TV-UNet2.h5', verbose = 1, save_best_only = True, save_weights_only = True)
 ]
 
-# results = model.fit(X_train, y_train, batch_size = 32, epochs = 100, callbacks = callbacks, \
-#                     validation_data = (X_valid, y_valid))
+if not args.infer:
+    results = model.fit(X_train, y_train, batch_size = 32, epochs = 100, callbacks = callbacks, \
+                         validation_data = (X_valid, y_valid))
 
 '''#########################################################################'''
 ########## Plot loss function
@@ -219,219 +226,216 @@ callbacks = [
 '''test'''
 # ids1 = next(os.walk(path+'CT_seg2/rp_im_test/'))[2] # list of Masks
 
-sys.stdout.flush()
+if args.infer:
+    sys.stdout.flush()
 
-test = np.full((1, 128, 128, 1), 0)
+    test = np.full((1, 128, 128, 1), 0)
 
-mask_test = np.full((1, 128, 128), 0)
+    mask_test = np.full((1, 128, 128), 0)
 
-img_each_patient = []
+    img_each_patient = []
 
-for n, id_ in tqdm(enumerate(id_test), total = len(id_test)):
-    test2 = nib.load(path + 'CT_seg2/rp_im/' + id_)
-    test_np2 = np.array(test2.get_fdata())
-    mask_test2 = nib.load(path + 'CT_seg2/rp_msk/' + id_)
-    mask_test_np2 = np.array(mask_test2.get_fdata())
+    for n, id_ in tqdm(enumerate(id_test), total = len(id_test)):
+        test2 = nib.load(path + 'CT_seg2/rp_im/' + id_)
+        test_np2 = np.array(test2.get_fdata())
+        mask_test2 = nib.load(path + 'CT_seg2/rp_msk/' + id_)
+        mask_test_np2 = np.array(mask_test2.get_fdata())
 
-    [x, y, z] = test_np2.shape
-    test_np2 = resize(test_np2, (im_height, im_height, z), mode = 'constant', preserve_range = True)
-    mask_np2 = resize(mask_test_np2, (im_height, im_height, z), mode = 'constant', preserve_range = True,
-                      anti_aliasing = False)
+        [x, y, z] = test_np2.shape
+        test_np2 = resize(test_np2, (im_height, im_height, z), mode = 'constant', preserve_range = True)
+        mask_np2 = resize(mask_test_np2, (im_height, im_height, z), mode = 'constant', preserve_range = True,
+                          anti_aliasing = False)
 
-    X_test = np.full((z, im_height, im_height, 1), 0)
-    y_test = np.full((z, im_height, im_height), 0)
+        X_test = np.full((z, im_height, im_height, 1), 0)
+        y_test = np.full((z, im_height, im_height), 0)
 
-    for i in range(z):
-        X_test[i, :, :, 0] = test_np2[:, :, i]
-        y_test[i, :, :] = mask_np2[:, :, i]
-    img_each_patient.append(X_test.shape[0])
-    test = np.vstack((test, X_test))
-    mask_test = np.vstack((mask_test, y_test))
+        for i in range(z):
+            X_test[i, :, :, 0] = test_np2[:, :, i]
+            y_test[i, :, :] = mask_np2[:, :, i]
+        img_each_patient.append(X_test.shape[0])
+        test = np.vstack((test, X_test))
+        mask_test = np.vstack((mask_test, y_test))
 
-'''#########################################################################'''
-import numpy as np
+    '''#########################################################################'''
+    import numpy as np
 
-label_test = np.full((len(mask_test), 128, 128, num_class), 0)
+    label_test = np.full((len(mask_test), 128, 128, num_class), 0)
 
-for i in range(len(mask_test)):
-    m1 = mask_test[i, :, :]
+    for i in range(len(mask_test)):
+        m1 = mask_test[i, :, :]
 
-    for ix in range(0, num_class):
-        label_test[i, :, :, ix] = np.where(m1 == ix, 1, 0)
+        for ix in range(0, num_class):
+            label_test[i, :, :, ix] = np.where(m1 == ix, 1, 0)
 
-'''#########################################################################'''
-########## Load the best Models and plot results
+    '''#########################################################################'''
+    ########## Load the best Models and plot results
 
-model.load_weights('model-TV-UNet2.h5')
-preds_test2 = model.predict(test, verbose = 1)
-preds_test_t2 = (preds_test2 > 0.3).astype(np.uint8)
-print(test.shape, test.dtype)
-print(preds_test_t2.shape, preds_test_t2.dtype)
-
-
-def plot_sample(X, y, binary_preds2):
-    fig, axs = plt.subplots(5, 3, figsize = (50, 50), sharex = 'all')
-    i = 0
-    for ix in [20, 50, 60, 110, 120]:
-        l = 1
-
-        axs[i, 0].imshow(X[ix, ..., 0], cmap = 'gray')
-        axs[0, 0].set_title('Original CT Images', fontweight = "bold", size = 40)
-
-        axs[i, 1].imshow(y[ix, :, :, l].squeeze(), cmap = 'gray')
-        axs[0, 1].set_title('Ground-Truth Mask', fontweight = "bold", size = 40)
-
-        axs[i, 2].imshow(binary_preds2[ix, :, :, l].squeeze(), cmap = 'gray', vmin = 0, vmax = 1)
-        axs[0, 2].set_title('Predicted Masks \n with TV_Unet', fontweight = "bold", size = 40);
-
-        i += 1
-
-        plt.rcParams["axes.grid"] = False
-
-    plt.savefig("./TV_Unet_Split1.png")
-    plt.show()
+    model.load_weights('model-TV-UNet2.h5')
+    preds_test2 = model.predict(test, verbose = 1)
+    preds_test_t2 = (preds_test2 > 0.3).astype(np.uint8)
 
 
-plot_sample(test, label_test, preds_test_t2)
-plt.rcParams["axes.grid"] = False
 
-test = test[1:, :, :, 0]
-preds_test_t2 = preds_test_t2[1:, :, :, 1]
-new_test = np.full((128, 128, test.shape[0]), 0)
-new_pred = np.full((128, 128, test.shape[0]), 0)
-for i in range(test.shape[0]):
-    new_test[:, :, i] = test[i, :, :]
-    new_pred[:, :, i] = preds_test_t2[i, :, :]
+    def plot_sample(X, y, binary_preds2):
+        fig, axs = plt.subplots(5, 3, figsize = (50, 50), sharex = 'all')
+        i = 0
+        for ix in [20, 50, 60, 110, 120]:
+            l = 1
 
-print(new_test.shape, new_test.dtype)
-print(new_pred.shape, new_pred.dtype)
-print(img_each_patient)
-# [42, 45, 93]
-index_patient = [0]
+            axs[i, 0].imshow(X[ix, ..., 0], cmap = 'gray')
+            axs[0, 0].set_title('Original CT Images', fontweight = "bold", size = 40)
 
-for index, CT_num in enumerate(img_each_patient):
-    current_index = index_patient[index]
-    patient_test = new_test[:, :, current_index:current_index + CT_num]
-    print(patient_test.shape)
-    nib.save(nib.Nifti1Image(patient_test.astype(np.float64), np.eye(4)), f'patient{index}_img.nii.gz')
-    patient_pred = new_pred[:, :, current_index:current_index + CT_num]
-    nib.save(nib.Nifti1Image(patient_pred.astype(np.uint8), np.eye(4)), f'patient{index}_pred.nii.gz')
-    index_patient.append(current_index + CT_num)
-'''#########################################################################'''
-########## plot Pre_Recall curve
-from sklearn.metrics import precision_recall_curve
+            axs[i, 1].imshow(y[ix, :, :, l].squeeze(), cmap = 'gray')
+            axs[0, 1].set_title('Ground-Truth Mask', fontweight = "bold", size = 40)
 
-from sklearn.metrics import average_precision_score
+            axs[i, 2].imshow(binary_preds2[ix, :, :, l].squeeze(), cmap = 'gray', vmin = 0, vmax = 1)
+            axs[0, 2].set_title('Predicted Masks \n with TV_Unet', fontweight = "bold", size = 40);
 
-labels = []
+            i += 1
 
-########## For TV_Unet Model
-precision2 = dict()
-recall2 = dict()
-average_precision2 = dict()
+            plt.rcParams["axes.grid"] = False
 
-for i in range(num_class):
-    y_test_f = K.flatten(label_test[:, :, :, i])
-    preds_test_f = K.flatten(preds_test2[:, :, :, i])
-    precision2[i], recall2[i], _ = precision_recall_curve(y_test_f, preds_test_f)
-
-    average_precision2[i] = average_precision_score(y_test_f, preds_test_f)
-
-##################################################
-# A "micro-average": quantifying score on all classes jointly
-y_test_f = K.flatten(label_test[:, :, :, 1])
-preds_test_f = K.flatten(preds_test2[:, :, :, 1])
-precision2["micro"], recall2["micro"], _ = precision_recall_curve(y_test_f, preds_test_f)
-average_precision2["micro"] = average_precision_score(y_test_f, preds_test_f,
-                                                      average = "micro")
-
-##################################################
+        plt.savefig("./TV_Unet_Split1.png")
+        plt.show()
 
 
-plt.figure(figsize = (7, 8))
-plt.step(recall2['micro'], precision2['micro'], where = 'post', color = 'r',
-         label = 'Average-Precision for TV-Unet Model ({0:0.2f})'.format(average_precision2['micro']))
+    plot_sample(test, label_test, preds_test_t2)
+    plt.rcParams["axes.grid"] = False
 
-plt.xlabel('Recall', size = 13)
-plt.ylabel('Precision', size = 13)
-plt.ylim([0.0, 1.05])
-plt.xlim([0.0, 1.0])
-
-plt.title('Extension of Precision-Recall curve')
-plt.legend('Average-Precision for TV-Unet Model ({0:0.2f})'.format(average_precision2['micro']))
-
-'''#########################################################################'''
-########## calculate precision and recall for each Model
-tre = np.arange(0.1, 1, 0.1).tolist()
-
-y_test_f = K.flatten(label_test[:, :, :, 1])
-preds_test_f = K.flatten(preds_test2[:, :, :, 1])
-m = tf.keras.metrics.Recall(thresholds = tre)
-n = tf.keras.metrics.Precision(thresholds = tre)
-m.update_state(y_test_f, preds_test_f)
-n.update_state(y_test_f, preds_test_f)
-recal_TVUnet = m.result().numpy()
-pre_TVUnet = n.result().numpy()
-print('recall_TV Unet=', recal_TVUnet)
-print('precision_TV Unet=', pre_TVUnet)
-
-'''#########################################################################'''
+    test = test[1:, :, :, 0]
+    preds_test_t2 = preds_test_t2[1:, :, :, 1]
+    new_test = np.full((128, 128, test.shape[0]), 0)
+    new_pred = np.full((128, 128, test.shape[0]), 0)
+    for i in range(test.shape[0]):
+        new_test[:, :, i] = test[i, :, :]
+        new_pred[:, :, i] = preds_test_t2[i, :, :]
 
 
-########## calculate dice score for each model
-def dice_coef(y_pred, y_true):
-    for tr in np.arange(0.1, 1, 0.1):
-        y_pred_t = (y_pred[:, :, :, 1] > tr).astype(np.uint8)
-        y_true_f = np.array(y_true[:, :, :, 1])
-        y_pred_f = np.array(y_pred_t)
-        intersection = np.sum(y_true_f * y_pred_f)
-        print(2 * (intersection) / (np.sum(y_true_f) + np.sum(y_pred_f)))
+    # [42, 45, 93]
+    index_patient = [0]
+
+    for index, CT_num in enumerate(img_each_patient):
+        current_index = index_patient[index]
+        patient_test = new_test[:, :, current_index:current_index + CT_num]
+        nib.save(nib.Nifti1Image(patient_test.astype(np.float64), np.eye(4)), f'patient{index}_img.nii.gz')
+        patient_pred = new_pred[:, :, current_index:current_index + CT_num]
+        nib.save(nib.Nifti1Image(patient_pred.astype(np.uint8), np.eye(4)), f'patient{index}_pred.nii.gz')
+        index_patient.append(current_index + CT_num)
+    '''#########################################################################'''
+    ########## plot Pre_Recall curve
+    from sklearn.metrics import precision_recall_curve
+
+    from sklearn.metrics import average_precision_score
+
+    labels = []
+
+    ########## For TV_Unet Model
+    precision2 = dict()
+    recall2 = dict()
+    average_precision2 = dict()
+
+    for i in range(num_class):
+        y_test_f = K.flatten(label_test[:, :, :, i])
+        preds_test_f = K.flatten(preds_test2[:, :, :, i])
+        precision2[i], recall2[i], _ = precision_recall_curve(y_test_f, preds_test_f)
+
+        average_precision2[i] = average_precision_score(y_test_f, preds_test_f)
+
+    ##################################################
+    # A "micro-average": quantifying score on all classes jointly
+    y_test_f = K.flatten(label_test[:, :, :, 1])
+    preds_test_f = K.flatten(preds_test2[:, :, :, 1])
+    precision2["micro"], recall2["micro"], _ = precision_recall_curve(y_test_f, preds_test_f)
+    average_precision2["micro"] = average_precision_score(y_test_f, preds_test_f,
+                                                          average = "micro")
+
+    ##################################################
 
 
-dice = dice_coef(preds_test2, label_test)
-print('TV Unet DSC=', dice)
+    plt.figure(figsize = (7, 8))
+    plt.step(recall2['micro'], precision2['micro'], where = 'post', color = 'r',
+             label = 'Average-Precision for TV-Unet Model ({0:0.2f})'.format(average_precision2['micro']))
 
-'''#########################################################################'''
+    plt.xlabel('Recall', size = 13)
+    plt.ylabel('Precision', size = 13)
+    plt.ylim([0.0, 1.05])
+    plt.xlim([0.0, 1.0])
+
+    plt.title('Extension of Precision-Recall curve')
+    plt.legend('Average-Precision for TV-Unet Model ({0:0.2f})'.format(average_precision2['micro']))
+
+    '''#########################################################################'''
+    ########## calculate precision and recall for each Model
+    tre = np.arange(0.1, 1, 0.1).tolist()
+
+    y_test_f = K.flatten(label_test[:, :, :, 1])
+    preds_test_f = K.flatten(preds_test2[:, :, :, 1])
+    m = tf.keras.metrics.Recall(thresholds = tre)
+    n = tf.keras.metrics.Precision(thresholds = tre)
+    m.update_state(y_test_f, preds_test_f)
+    n.update_state(y_test_f, preds_test_f)
+    recal_TVUnet = m.result().numpy()
+    pre_TVUnet = n.result().numpy()
+    print('recall_TV Unet=', recal_TVUnet)
+    print('precision_TV Unet=', pre_TVUnet)
+
+    '''#########################################################################'''
 
 
-########## calculate mIOU
-def jaccard_distance_loss(y_true, y_pred, smooth = 100):
-    for tr in np.arange(0.1, 1, 0.1):
-        """
-        Jaccard = (|X & Y|)/ (|X|+ |Y| - |X & Y|)
-                = sum(|A*B|)/(sum(|A|)+sum(|B|)-sum(|A*B|))
-        """
-        y_pred_t = (y_pred[:, :, :, :] > tr).astype(np.uint8)
-        y_true_f = np.array(y_true[:, :, :, :])
-        y_pred_f = np.array(y_pred_t)
-        intersection = np.sum(y_true_f * y_pred_f, axis = -1)
-        sum_ = np.sum(np.abs(y_true_f) + np.abs(y_pred_f), axis = -1)
-        jac = (intersection + smooth) / (sum_ - intersection + smooth)
-        print(np.mean(jac))
+    ########## calculate dice score for each model
+    def dice_coef(y_pred, y_true):
+        for tr in np.arange(0.1, 1, 0.1):
+            y_pred_t = (y_pred[:, :, :, 1] > tr).astype(np.uint8)
+            y_true_f = np.array(y_true[:, :, :, 1])
+            y_pred_f = np.array(y_pred_t)
+            intersection = np.sum(y_true_f * y_pred_f)
+            print(2 * (intersection) / (np.sum(y_true_f) + np.sum(y_pred_f)))
 
 
-mIOU = jaccard_distance_loss(label_test, preds_test2)
-print('Unet mIOU=', mIOU)
+    dice = dice_coef(preds_test2, label_test)
+    print('TV Unet DSC=', dice)
 
-'''#########################################################################'''
+    '''#########################################################################'''
 
-# pyradiomics
-paramPath = os.path.join("param.yaml")
 
-extractor = featureextractor.RadiomicsFeatureExtractor(paramPath)
+    ########## calculate mIOU
+    def jaccard_distance_loss(y_true, y_pred, smooth = 100):
+        for tr in np.arange(0.1, 1, 0.1):
+            """
+            Jaccard = (|X & Y|)/ (|X|+ |Y| - |X & Y|)
+                    = sum(|A*B|)/(sum(|A|)+sum(|B|)-sum(|A*B|))
+            """
+            y_pred_t = (y_pred[:, :, :, :] > tr).astype(np.uint8)
+            y_true_f = np.array(y_true[:, :, :, :])
+            y_pred_f = np.array(y_pred_t)
+            intersection = np.sum(y_true_f * y_pred_f, axis = -1)
+            sum_ = np.sum(np.abs(y_true_f) + np.abs(y_pred_f), axis = -1)
+            jac = (intersection + smooth) / (sum_ - intersection + smooth)
+            print(np.mean(jac))
 
-print('Extraction parameters:\n\t', extractor.settings)
-print('Enabled filters:\n\t', extractor.enabledImagetypes)
-print('Enabled features:\n\t', extractor.enabledFeatures)
 
-# feature extraction
-print(test.shape[2])
-for i in range(len(id_test)):
-    imagePath = f'patient{i}_img.nii.gz'
-    maskPath = f'patient{i}_pred.nii.gz'
-    result = extractor.execute(imagePath, maskPath)
-    print('Result type:', type(result))  # result is returned in a Python ordered dictionary)
-    print('')
-    print('Calculated features')
-    for key, value in six.iteritems(result):
-        print('\t', key, ':', value)
+    mIOU = jaccard_distance_loss(label_test, preds_test2)
+    print('Unet mIOU=', mIOU)
+
+    '''#########################################################################'''
+
+    # pyradiomics
+    paramPath = os.path.join("param.yaml")
+
+    extractor = featureextractor.RadiomicsFeatureExtractor(paramPath)
+
+    print('Extraction parameters:\n\t', extractor.settings)
+    print('Enabled filters:\n\t', extractor.enabledImagetypes)
+    print('Enabled features:\n\t', extractor.enabledFeatures)
+
+    # feature extraction
+    print(test.shape[2])
+    for i in range(len(id_test)):
+        imagePath = f'patient{i}_img.nii.gz'
+        maskPath = f'patient{i}_pred.nii.gz'
+        result = extractor.execute(imagePath, maskPath)
+        print('Result type:', type(result))  # result is returned in a Python ordered dictionary)
+        print('')
+        print('Calculated features')
+        for key, value in six.iteritems(result):
+            print('\t', key, ':', value)
